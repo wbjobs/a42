@@ -311,7 +311,66 @@
           <span class="path">/api/disassemble</span>
           <div class="endpoint-desc">反汇编 Malbolge</div>
         </div>
+        <div class="endpoint">
+          <span class="method post">POST</span>
+          <span class="path">/api/debug</span>
+          <div class="endpoint-desc">调试 Malbolge (支持断点)</div>
+        </div>
       </div>
+    </div>
+
+    <div class="card section">
+      <h2>🔍 调试模式</h2>
+      <div class="controls">
+        <label style="display: flex; align-items: center; gap: 8px;">
+          断点地址:
+          <input type="number" id="breakAddress" placeholder="例如: 50" min="0" max="59048" style="width: 120px; padding: 6px 10px; background: #21262d; color: #e6edf3; border: 1px solid #30363d; border-radius: 6px;">
+        </label>
+        <label style="display: flex; align-items: center; gap: 8px;">
+          内存范围:
+          <input type="number" id="memStart" value="0" min="0" max="59048" style="width: 80px; padding: 6px 10px; background: #21262d; color: #e6edf3; border: 1px solid #30363d; border-radius: 6px;">
+          -
+          <input type="number" id="memEnd" value="200" min="1" max="59049" style="width: 80px; padding: 6px 10px; background: #21262d; color: #e6edf3; border: 1px solid #30363d; border-radius: 6px;">
+        </label>
+        <label style="display: flex; align-items: center; gap: 8px;">
+          追踪步数:
+          <input type="number" id="traceSteps" value="50" min="1" max="1000" style="width: 80px; padding: 6px 10px; background: #21262d; color: #e6edf3; border: 1px solid #30363d; border-radius: 6px;">
+        </label>
+        <button class="primary" onclick="debugCode()">开始调试</button>
+      </div>
+      <div id="debugOutput" class="output-area" style="max-height: 400px; overflow-y: auto;">输入断点地址并点击"开始调试"按钮...</div>
+    </div>
+
+    <div class="card section" id="debugResults" style="display: none;">
+      <h3>📊 寄存器状态</h3>
+      <div class="stats">
+        <div class="stat">
+          <div class="stat-value" id="regA">-</div>
+          <div class="stat-label">A (累加器)</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value" id="regC">-</div>
+          <div class="stat-label">C (指令指针)</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value" id="regD">-</div>
+          <div class="stat-label">D (数据指针)</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value" id="debugSteps">-</div>
+          <div class="stat-label">执行步数</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card section" id="debugInstr" style="display: none;">
+      <h3>📝 当前指令</h3>
+      <div id="currentInstr" class="output-area" style="min-height: 80px;"></div>
+    </div>
+
+    <div class="card section" id="debugTrace" style="display: none;">
+      <h3>📜 执行轨迹 (最近 N 步)</h3>
+      <div id="traceOutput" class="output-area" style="max-height: 300px; overflow-y: auto; font-size: 0.75rem;"></div>
     </div>
   </div>
 
@@ -468,6 +527,133 @@ print("!")`
       }).catch(() => {
         alert('复制失败');
       });
+    }
+
+    async function debugCode() {
+      if (!currentMalbolge) {
+        alert('请先编译代码');
+        return;
+      }
+
+      const breakAddress = document.getElementById('breakAddress').value;
+      const memStart = parseInt(document.getElementById('memStart').value);
+      const memEnd = parseInt(document.getElementById('memEnd').value);
+      const traceSteps = parseInt(document.getElementById('traceSteps').value);
+      const output = document.getElementById('debugOutput');
+
+      output.textContent = '调试中...';
+      output.className = 'output-area loading';
+
+      document.getElementById('debugResults').style.display = 'none';
+      document.getElementById('debugInstr').style.display = 'none';
+      document.getElementById('debugTrace').style.display = 'none';
+
+      try {
+        const body = {
+          code: currentMalbolge,
+          memorySnapshotRange: [memStart, memEnd],
+          traceLastSteps: traceSteps
+        };
+
+        if (breakAddress && breakAddress !== '') {
+          body.breakAtAddress = parseInt(breakAddress);
+        }
+
+        const response = await fetch('/api/debug', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || '调试失败');
+        }
+
+        let resultText = '';
+        if (data.status === 'breakpoint') {
+          resultText += `✅ 已到达断点地址: ${data.breakpointAddress}\n\n`;
+        } else if (data.status === 'halted') {
+          resultText += '⏹️ 程序已停止\n\n';
+        }
+
+        if (data.error) {
+          resultText += `❌ 错误: ${data.error}\n\n`;
+        }
+
+        resultText += `执行步数: ${data.stepsExecuted}\n`;
+        resultText += `当前输出: "${data.output}"\n\n`;
+
+        if (data.currentInstruction) {
+          const instr = data.currentInstruction;
+          if (instr.error) {
+            resultText += `⚠️  当前指令错误: ${instr.error}\n`;
+          } else {
+              resultText += `当前指令 [${instr.address}]: `;
+              resultText += `'${instr.char}' (${instr.charCode}) `;
+              if (instr.decoded) {
+                resultText += `→ ${instr.decoded.mnem} - ${instr.decoded.name} - ${instr.decoded.desc}\n`;
+              }
+            }
+        }
+
+        output.textContent = resultText;
+        output.className = 'output-area';
+
+        if (data.registers) {
+          document.getElementById('debugResults').style.display = 'block';
+          const regA = data.registers.A;
+          const regC = data.registers.C;
+          const regD = data.registers.D;
+
+          document.getElementById('regA').textContent = `${regA.value}\n(${regA.char} [${regA.trits}]`;
+          document.getElementById('regC').textContent = `${regC.value}\n${regC.isInProgram ? '程序内' : '程序外'}`;
+          document.getElementById('regD').textContent = `${regD.value}\n→ ${regD.memoryValue}`;
+          document.getElementById('debugSteps').textContent = data.stepsExecuted;
+        }
+
+        if (data.currentInstruction && !data.currentInstruction.decoded) {
+          document.getElementById('debugInstr').style.display = 'block';
+          const instr = data.currentInstruction;
+          const dec = instr.decoded;
+          document.getElementById('currentInstr').innerHTML = 
+            `<strong>地址:</strong> ${instr.address}<br>` +
+            `<strong>字符:</strong> '${instr.char}' (${instr.charCode})<br>` +
+            `<strong>操作码:</strong> ${dec.mnem || '?'}<br>` +
+            `<strong>操作名:</strong> ${dec.name}<br>` +
+            `<strong>说明:</strong> ${dec.desc}`;
+        }
+
+        if (data.trace && data.trace.length > 0) {
+          document.getElementById('debugTrace').style.display = 'block';
+          let traceHtml = '';
+          for (const step of data.trace) {
+            traceHtml += `<div style="border-bottom: 1px solid #30363d; padding: 8px 0;">`;
+            traceHtml += `<span style="color: #58a6ff;">[${step.step}]</span> `;
+            if (step.instruction) {
+              traceHtml += `C=${step.C} D=${step.D} A=${step.A} `;
+              traceHtml += `<span style="color: #f0883e;">${step.instruction.mnemonic}</span> `;
+              traceHtml += `<span style="color: #8b949e;">${step.instruction.operation}</span>`;
+              if (step.result) {
+                traceHtml += ` <span style="color: #7ee787;">→ ${JSON.stringify(step.result).substring(0, 60)}</span>`;
+              }
+              if (step.selfModification) {
+                traceHtml += ` <span style="color: #ff7b72;">[自修改]</span>`;
+              }
+              if (step.error) {
+                traceHtml += ` <span style="color: #ff7b72;">[错误: ${step.error}</span>`;
+              }
+            }
+            traceHtml += '</div>';
+          }
+          document.getElementById('traceOutput').innerHTML = traceHtml;
+        }
+
+      } catch (e) {
+        output.textContent = '错误: ' + e.message;
+        output.className = 'output-area error';
+      }
     }
   </script>
 </body>

@@ -3,6 +3,22 @@ const MEMORY_SIZE = 59049;
 const XLAT2 = '5z]&gqtyfr$(we4{WP)H-Zn,[%\\3dL+Q;>U!pJS72FhOA1CB6v^=I_0/8|jsb9m<.TVac`uY*MK\'X~xDl}REokN:#?G"i@';
 const XLAT2_FROM = '!"#$%&\'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~';
 
+const OP_NAMES = {
+  4: { name: 'jump', desc: 'C = [D] - 1 (jump to data pointer address)', mnem: 'i' },
+  5: { name: 'output', desc: 'Output A % 256 as character', mnem: '<' },
+  23: { name: 'input', desc: 'Read character into A', mnem: '/' },
+  39: { name: 'rotate', desc: 'A = [D] = rotr([D])', mnem: '*' },
+  40: { name: 'dataptr', desc: 'D = [D] (move data pointer)', mnem: 'j' },
+  62: { name: 'crazy', desc: 'A = [D] = crz([D], A)', mnem: 'p' },
+  68: { name: 'nop', desc: 'No operation', mnem: 'o' },
+  81: { name: 'halt', desc: 'Halt program', mnem: 'v' }
+};
+
+function decodeOp(charCode, position) {
+  const op = (position + charCode) % 94;
+  return OP_NAMES[op] || { name: 'unknown', desc: 'Unknown operation (nop)', mnem: '?', opCode: op };
+}
+
 const CRZ_TABLE = [
   [1, 0, 0],
   [1, 0, 2],
@@ -183,13 +199,223 @@ function validateProgram(source) {
   };
 }
 
+function debug(source, options = {}) {
+  const {
+    breakAtAddress = null,
+    maxSteps = 1000000,
+    memorySnapshotRange = [0, 200],
+    traceLastSteps = 50,
+    input = ''
+  } = options;
+
+  const memory = loadProgram(source);
+  let C = 0;
+  let D = 0;
+  let A = 0;
+  let output = '';
+  let inputPos = 0;
+  let steps = 0;
+  let halted = false;
+  let error = null;
+  let hitBreakpoint = false;
+  const trace = [];
+  const programLength = validateProgram(source).length;
+
+  while (steps < maxSteps) {
+    if (breakAtAddress !== null && C === breakAtAddress) {
+      hitBreakpoint = true;
+      break;
+    }
+
+    steps++;
+    const stepTrace = { step: steps, C, D, A };
+
+    const cell = memory[C];
+    if (cell < 33 || cell > 126) {
+      halted = true;
+      error = `Invalid instruction at address ${C}: value ${cell} (out of printable range 33-126)`;
+      stepTrace.error = error;
+      if (trace.length >= traceLastSteps) trace.shift();
+      trace.push(stepTrace);
+      break;
+    }
+
+    const op = (C + cell) % 94;
+    const opInfo = decodeOp(cell, C);
+    const originalC = C;
+
+    stepTrace.instruction = {
+      address: C,
+      charCode: cell,
+      char: String.fromCharCode(cell),
+      opCode: op,
+      mnemonic: opInfo.mnem,
+      operation: opInfo.name,
+      description: opInfo.desc
+    };
+    stepTrace.memoryD = {
+      address: D,
+      value: memory[D]
+    };
+
+    switch (op) {
+      case 4:
+        C = (memory[D] - 1 + MEMORY_SIZE) % MEMORY_SIZE;
+        stepTrace.result = { jumpTarget: memory[D], newC: C };
+        break;
+      case 5:
+        const outChar = String.fromCharCode(A % 256);
+        output += outChar;
+        stepTrace.result = { outputChar: outChar, outputCharCode: A % 256 };
+        break;
+      case 23:
+        if (inputPos < input.length) {
+          A = input.charCodeAt(inputPos);
+          inputPos++;
+        } else {
+          A = 0;
+        }
+        stepTrace.result = { newA: A };
+        break;
+      case 39:
+        const rotated = rotr(memory[D]);
+        A = rotated;
+        memory[D] = rotated;
+        stepTrace.result = { rotatedValue: rotated, newA: A };
+        break;
+      case 40:
+        D = memory[D] % MEMORY_SIZE;
+        stepTrace.result = { newD: D };
+        break;
+      case 62:
+        const crazyResult = crz(memory[D], A);
+        A = crazyResult;
+        memory[D] = crazyResult;
+        stepTrace.result = { crazyResult, newA: A };
+        break;
+      case 68:
+        stepTrace.result = { note: 'NOP' };
+        break;
+      case 81:
+        halted = true;
+        stepTrace.result = { note: 'HALT' };
+        break;
+      default:
+        stepTrace.result = { note: 'NOP (unknown opcode)' };
+        break;
+    }
+
+    if (trace.length >= traceLastSteps) trace.shift();
+    trace.push(stepTrace);
+
+    if (halted) break;
+
+    const originalCell = memory[originalC];
+    if (originalCell >= 33 && originalCell <= 126) {
+      memory[originalC] = xlat2(originalCell);
+      stepTrace.selfModification = {
+        address: originalC,
+        before: originalCell,
+        beforeChar: String.fromCharCode(originalCell),
+        after: memory[originalC],
+        afterChar: String.fromCharCode(memory[originalC])
+      };
+    }
+
+    C = (C + 1) % MEMORY_SIZE;
+    D = (D + 1) % MEMORY_SIZE;
+
+    stepTrace.afterExecution = { C, D, A };
+  }
+
+  if (steps >= maxSteps && !halted && !hitBreakpoint) {
+    error = 'Maximum execution steps exceeded';
+  }
+
+  const [memStart, memEnd] = memorySnapshotRange;
+  const memorySnapshot = {};
+  const snapshotStart = Math.max(0, memStart);
+  const snapshotEnd = Math.min(MEMORY_SIZE, memEnd);
+  for (let i = snapshotStart; i < snapshotEnd; i++) {
+    const val = memory[i];
+    memorySnapshot[i] = {
+      value: val,
+      char: (val >= 33 && val <= 126) ? String.fromCharCode(val) : null,
+      isInstruction: i < programLength,
+      decodedOp: (val >= 33 && val <= 126) ? decodeOp(val, i) : null
+    };
+  }
+
+  const currentInstruction = (memory[C] >= 33 && memory[C] <= 126) 
+    ? {
+        address: C,
+        charCode: memory[C],
+        char: String.fromCharCode(memory[C]),
+        decoded: decodeOp(memory[C], C)
+      }
+    : {
+        address: C,
+        charCode: memory[C],
+        error: 'Invalid instruction at current address'
+      };
+
+  const nextInstruction = (memory[(C + 1) % MEMORY_SIZE] >= 33 && memory[(C + 1) % MEMORY_SIZE] <= 126)
+    ? {
+        address: (C + 1) % MEMORY_SIZE,
+        charCode: memory[(C + 1) % MEMORY_SIZE],
+        char: String.fromCharCode(memory[(C + 1) % MEMORY_SIZE]),
+        decoded: decodeOp(memory[(C + 1) % MEMORY_SIZE], (C + 1) % MEMORY_SIZE)
+      }
+    : null;
+
+  return {
+    status: hitBreakpoint ? 'breakpoint' : (halted ? 'halted' : 'running'),
+    error,
+    hitBreakpoint,
+    breakpointAddress: breakAtAddress,
+    output,
+    stepsExecuted: steps,
+    registers: {
+      A: {
+        value: A,
+        mod256: A % 256,
+        char: String.fromCharCode(A % 256),
+        trits: A.toString(3).padStart(10, '0')
+      },
+      C: {
+        value: C,
+        isInProgram: C < programLength,
+        offsetFromProgramStart: C < programLength ? C : `+${C - programLength}`
+      },
+      D: {
+        value: D,
+        memoryValue: memory[D],
+        memoryChar: (memory[D] >= 33 && memory[D] <= 126) ? String.fromCharCode(memory[D]) : null,
+        isInProgram: D < programLength
+      }
+    },
+    currentInstruction,
+    nextInstruction,
+    memorySnapshot,
+    memorySnapshotRange: [snapshotStart, snapshotEnd],
+    trace,
+    programInfo: {
+      length: programLength,
+      firstInvalidAddress: programLength
+    }
+  };
+}
+
 module.exports = {
   interpret,
   validateProgram,
   loadProgram,
+  debug,
+  decodeOp,
   crz,
   rotr,
   MEMORY_SIZE,
   XLAT2,
-  XLAT2_FROM
+  XLAT2_FROM,
+  OP_NAMES
 };

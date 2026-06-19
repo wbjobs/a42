@@ -1,7 +1,7 @@
 const express = require('express');
 const path = require('path');
 const { transpile } = require('./compiler/transpiler');
-const { interpret, validateProgram } = require('./malbolge/interpreter');
+const { interpret, validateProgram, debug } = require('./malbolge/interpreter');
 const { assemble, disassemble } = require('./malbolge/assembler');
 
 const app = express();
@@ -187,6 +187,69 @@ app.post('/api/disassemble', (req, res) => {
   } catch (error) {
     res.status(500).json({
       error: 'Disassembly failed',
+      message: error.message
+    });
+  }
+});
+
+app.post('/api/debug', (req, res) => {
+  try {
+    const { code, breakAtAddress, maxSteps, memorySnapshotRange, traceLastSteps, input } = req.body;
+
+    if (!code || typeof code !== 'string') {
+      return res.status(400).json({
+        error: 'Invalid request',
+        message: 'Malbolge code is required'
+      });
+    }
+
+    const validation = validateProgram(code);
+    if (!validation.valid) {
+      return res.status(400).json({
+        error: 'Invalid Malbolge code',
+        message: 'Code contains invalid characters',
+        errors: validation.errors
+      });
+    }
+
+    if (breakAtAddress !== undefined && breakAtAddress !== null) {
+      if (typeof breakAtAddress !== 'number' || breakAtAddress < 0 || breakAtAddress >= 59049) {
+        return res.status(400).json({
+          error: 'Invalid breakpoint address',
+          message: 'breakAtAddress must be a number between 0 and 59048'
+        });
+      }
+    }
+
+    const options = {};
+    if (breakAtAddress !== undefined) options.breakAtAddress = breakAtAddress;
+    if (maxSteps !== undefined) options.maxSteps = maxSteps;
+    if (memorySnapshotRange !== undefined) options.memorySnapshotRange = memorySnapshotRange;
+    if (traceLastSteps !== undefined) options.traceLastSteps = traceLastSteps;
+    if (input !== undefined) options.input = input;
+
+    const result = debug(code, options);
+
+    res.json({
+      success: true,
+      status: result.status,
+      hitBreakpoint: result.hitBreakpoint,
+      breakpointAddress: result.breakpointAddress,
+      error: result.error,
+      output: result.output,
+      stepsExecuted: result.stepsExecuted,
+      registers: result.registers,
+      currentInstruction: result.currentInstruction,
+      nextInstruction: result.nextInstruction,
+      memorySnapshot: result.memorySnapshot,
+      memorySnapshotRange: result.memorySnapshotRange,
+      trace: result.trace,
+      programInfo: result.programInfo
+    });
+  } catch (error) {
+    console.error('Debug error:', error);
+    res.status(500).json({
+      error: 'Debug session failed',
       message: error.message
     });
   }

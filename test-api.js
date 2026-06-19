@@ -1,6 +1,7 @@
 const http = require('http');
 const { transpile } = require('./src/compiler/transpiler');
 const { generateForString } = require('./src/malbolge/generator');
+const { assemble } = require('./src/malbolge/assembler');
 
 const app = require('./src/server');
 
@@ -183,7 +184,64 @@ async function runTests() {
     });
 
     console.log();
-    console.log('7. Error Handling');
+    console.log('7. Debug Endpoint');
+    console.log('-'.repeat(40));
+
+    await test('POST /api/debug returns state info', async () => {
+      const res = await makeRequest('POST', '/api/debug', {
+        code: 'ABCDEFGHIJ',
+        maxSteps: 5
+      });
+      if (res.status !== 200) throw new Error(`Expected 200, got ${res.status}`);
+      if (!res.data.registers) throw new Error('Expected registers in response');
+      if (!res.data.currentInstruction) throw new Error('Expected currentInstruction in response');
+      if (!res.data.memorySnapshot) throw new Error('Expected memorySnapshot in response');
+      if (!Array.isArray(res.data.trace)) throw new Error('Expected trace array in response');
+    });
+
+    await test('POST /api/debug with breakpoint', async () => {
+      let normalized = '';
+      for (let i = 0; i < 50; i++) normalized += 'o';
+      const code = assemble(normalized);
+      const res = await makeRequest('POST', '/api/debug', {
+        code: code,
+        breakAtAddress: 10,
+        maxSteps: 100
+      });
+      if (res.status !== 200) throw new Error(`Expected 200, got ${res.status}`);
+      if (res.data.hitBreakpoint !== true) throw new Error('Expected hitBreakpoint: true');
+      if (res.data.registers.C.value !== 10) throw new Error(`Expected C=10, got ${res.data.registers.C.value}`);
+    });
+
+    await test('POST /api/debug with custom memory range', async () => {
+      const res = await makeRequest('POST', '/api/debug', {
+        code: 'ABCDEFG',
+        memorySnapshotRange: [0, 50],
+        maxSteps: 3
+      });
+      if (res.status !== 200) throw new Error(`Expected 200, got ${res.status}`);
+      if (res.data.memorySnapshotRange[0] !== 0) throw new Error('Expected snapshot start 0');
+      if (res.data.memorySnapshotRange[1] !== 50) throw new Error('Expected snapshot end 50');
+      if (Object.keys(res.data.memorySnapshot).length !== 50) throw new Error('Expected 50 memory entries');
+    });
+
+    await test('POST /api/debug with invalid breakpoint returns 400', async () => {
+      const res = await makeRequest('POST', '/api/debug', {
+        code: 'ABC',
+        breakAtAddress: -1
+      });
+      if (res.status !== 400) throw new Error(`Expected 400, got ${res.status}`);
+      if (!res.data.error) throw new Error('Expected error in response');
+    });
+
+    await test('POST /api/debug with no code returns 400', async () => {
+      const res = await makeRequest('POST', '/api/debug', {});
+      if (res.status !== 400) throw new Error(`Expected 400, got ${res.status}`);
+      if (!res.data.error) throw new Error('Expected error in response');
+    });
+
+    console.log();
+    console.log('8. Error Handling');
     console.log('-'.repeat(40));
 
     await test('404 for unknown route', async () => {

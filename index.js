@@ -17,6 +17,7 @@ app.listen(PORT, () => {
   console.log('    POST /api/validate     - Validate Malbolge code');
   console.log('    POST /api/assemble     - Assemble normalized Malbolge');
   console.log('    POST /api/disassemble  - Disassemble Malbolge code');
+  console.log('    POST /api/debug        - Debug Malbolge with breakpoint');
   console.log();
   console.log('=' .repeat(60));
 });
