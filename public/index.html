@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Malbolge Compiler - 普通代码转 Malbolge</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      min-height: 100vh;
+      padding: 20px;
+    }
+    
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    
+    header {
+      text-align: center;
+      padding: 30px 0;
+      margin-bottom: 30px;
+      border-bottom: 1px solid #30363d;
+    }
+    
+    h1 {
+      font-size: 2rem;
+      background: linear-gradient(135deg, #58a6ff, #bc8cff);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    
+    .subtitle {
+      color: #8b949e;
+      margin-top: 8px;
+    }
+    
+    .main-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-bottom: 30px;
+    }
+    
+    .card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 20px;
+    }
+    
+    .card h2 {
+      font-size: 1.1rem;
+      margin-bottom: 12px;
+      color: #58a6ff;
+    }
+    
+    .controls {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+    
+    select, button {
+      background: #21262d;
+      color: #e6edf3;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 8px 16px;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    
+    button:hover, select:hover {
+      background: #30363d;
+      border-color: #58a6ff;
+    }
+    
+    button.primary {
+      background: #238636;
+      border-color: #238636;
+    }
+    
+    button.primary:hover {
+      background: #2ea043;
+    }
+    
+    textarea {
+      width: 100%;
+      height: 200px;
+      background: #0d1117;
+      color: #e6edf3;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 12px;
+      font-family: 'Courier New', Consolas, monospace;
+      font-size: 0.85rem;
+      resize: vertical;
+      line-height: 1.5;
+    }
+    
+    textarea:focus {
+      outline: none;
+      border-color: #58a6ff;
+    }
+    
+    .output-area {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 12px;
+      min-height: 200px;
+      font-family: 'Courier New', Consolas, monospace;
+      font-size: 0.85rem;
+      white-space: pre-wrap;
+      word-break: break-all;
+      line-height: 1.5;
+      color: #7ee787;
+    }
+    
+    .section {
+      margin-bottom: 30px;
+    }
+    
+    .section h3 {
+      font-size: 1rem;
+      margin-bottom: 12px;
+      color: #d2a8ff;
+    }
+    
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+    
+    .stat {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 10px;
+      text-align: center;
+    }
+    
+    .stat-value {
+      font-size: 1.2rem;
+      font-weight: bold;
+      color: #58a6ff;
+    }
+    
+    .stat-label {
+      font-size: 0.75rem;
+      color: #8b949e;
+      margin-top: 4px;
+    }
+    
+    .endpoints {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 10px;
+    }
+    
+    .endpoint {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 12px;
+    }
+    
+    .method {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      font-weight: bold;
+      margin-right: 8px;
+    }
+    
+    .method.get { background: #238636; }
+    .method.post { background: #1f6feb; }
+    
+    .path {
+      font-family: 'Courier New', monospace;
+      font-size: 0.85rem;
+    }
+    
+    .endpoint-desc {
+      color: #8b949e;
+      font-size: 0.8rem;
+      margin-top: 6px;
+    }
+    
+    .loading {
+      color: #d29922;
+    }
+    
+    .error {
+      color: #f85149;
+    }
+    
+    @media (max-width: 768px) {
+      .main-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Malbolge 编译器</h1>
+      <p class="subtitle">将普通代码（JS / Python）编译为 Malbolge 深奥编程语言</p>
+    </header>
+
+    <div class="main-grid">
+      <div class="card">
+        <h2>📝 输入源代码</h2>
+        <div class="controls">
+          <select id="language">
+            <option value="javascript">JavaScript</option>
+            <option value="python">Python</option>
+          </select>
+          <select id="example">
+            <option value="">-- 选择示例 --</option>
+            <option value="hello">Hello World</option>
+            <option value="multi">多行输出</option>
+            <option value="var">变量和输出</option>
+          </select>
+          <button class="primary" onclick="compileCode()">编译 →</button>
+        </div>
+        <textarea id="sourceCode" placeholder="输入 JavaScript 或 Python 代码...">console.log("Hello, Malbolge!");</textarea>
+      </div>
+
+      <div class="card">
+        <h2>💀 Malbolge 输出</h2>
+        <div class="controls">
+          <button onclick="interpretCode()">▶ 运行</button>
+          <button onclick="disassembleCode()">🔍 反汇编</button>
+          <button onclick="copyOutput()">📋 复制</button>
+        </div>
+        <div id="output" class="output-area">点击"编译"按钮生成 Malbolge 代码...</div>
+        <div class="stats">
+          <div class="stat">
+            <div class="stat-value" id="codeLength">-</div>
+            <div class="stat-label">代码长度</div>
+          </div>
+          <div class="stat">
+            <div class="stat-value" id="normLength">-</div>
+            <div class="stat-label">指令数</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card section">
+      <h2>▶ 解释执行结果</h2>
+      <div id="interpretOutput" class="output-area">运行 Malbolge 代码后，输出将显示在这里...</div>
+      <div class="stats">
+        <div class="stat">
+          <div class="stat-value" id="steps">-</div>
+          <div class="stat-label">执行步数</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value" id="halted">-</div>
+          <div class="stat-label">是否停止</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value" id="outputLength">-</div>
+          <div class="stat-label">输出长度</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card section">
+      <h2>📚 API 接口</h2>
+      <div class="endpoints">
+        <div class="endpoint">
+          <span class="method get">GET</span>
+          <span class="path">/api/health</span>
+          <div class="endpoint-desc">健康检查</div>
+        </div>
+        <div class="endpoint">
+          <span class="method post">POST</span>
+          <span class="path">/api/compile</span>
+          <div class="endpoint-desc">编译源码为 Malbolge</div>
+        </div>
+        <div class="endpoint">
+          <span class="method post">POST</span>
+          <span class="path">/api/interpret</span>
+          <div class="endpoint-desc">解释执行 Malbolge</div>
+        </div>
+        <div class="endpoint">
+          <span class="method post">POST</span>
+          <span class="path">/api/validate</span>
+          <div class="endpoint-desc">验证 Malbolge 代码</div>
+        </div>
+        <div class="endpoint">
+          <span class="method post">POST</span>
+          <span class="path">/api/assemble</span>
+          <div class="endpoint-desc">汇编归一化代码</div>
+        </div>
+        <div class="endpoint">
+          <span class="method post">POST</span>
+          <span class="path">/api/disassemble</span>
+          <div class="endpoint-desc">反汇编 Malbolge</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const examples = {
+      javascript: {
+        hello: 'console.log("Hello, Malbolge!");',
+        multi: `console.log("Line 1");
+console.log("Line 2");
+console.log("Line 3");`,
+        var: `let greeting = "Hello";
+let target = "World";
+console.log(greeting);
+console.log(", ");
+console.log(target);
+console.log("!");`
+      },
+      python: {
+        hello: 'print("Hello, Malbolge!")',
+        multi: `print("Line 1")
+print("Line 2")
+print("Line 3")`,
+        var: `greeting = "Hello"
+target = "World"
+print(greeting)
+print(", ")
+print(target)
+print("!")`
+      }
+    };
+
+    let currentMalbolge = '';
+    let currentNormalized = '';
+
+    document.getElementById('language').addEventListener('change', function() {
+      const lang = this.value;
+      const exampleSel = document.getElementById('example');
+      const currentExample = exampleSel.value;
+      if (currentExample && examples[lang][currentExample]) {
+        document.getElementById('sourceCode').value = examples[lang][currentExample];
+      }
+    });
+
+    document.getElementById('example').addEventListener('change', function() {
+      const lang = document.getElementById('language').value;
+      const example = this.value;
+      if (example && examples[lang][example]) {
+        document.getElementById('sourceCode').value = examples[lang][example];
+      }
+    });
+
+    async function compileCode() {
+      const source = document.getElementById('sourceCode').value;
+      const language = document.getElementById('language').value;
+      const output = document.getElementById('output');
+      
+      output.textContent = '编译中...';
+      output.className = 'output-area loading';
+      
+      try {
+        const response = await fetch('/api/compile', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ source, language })
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(data.error || '编译失败');
+        }
+        
+        currentMalbolge = data.malbolgeCode;
+        currentNormalized = data.normalizedCode;
+        output.textContent = currentMalbolge;
+        output.className = 'output-area';
+        
+        document.getElementById('codeLength').textContent = data.metadata.codeLength || currentMalbolge.length;
+        document.getElementById('normLength').textContent = data.normalizedCode ? data.normalizedCode.length : '-';
+      } catch (e) {
+        output.textContent = '错误: ' + e.message;
+        output.className = 'output-area error';
+      }
+    }
+
+    async function interpretCode() {
+      if (!currentMalbolge) {
+        alert('请先编译代码');
+        return;
+      }
+      
+      const output = document.getElementById('interpretOutput');
+      output.textContent = '执行中...';
+      output.className = 'output-area loading';
+      
+      try {
+        const response = await fetch('/api/interpret', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: currentMalbolge, maxSteps: 100000 })
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(data.error || '执行失败');
+        }
+        
+        output.textContent = data.output || '(无输出)';
+        output.className = 'output-area';
+        
+        document.getElementById('steps').textContent = data.steps;
+        document.getElementById('halted').textContent = data.halted ? '是' : '否';
+        document.getElementById('outputLength').textContent = data.output ? data.output.length : 0;
+      } catch (e) {
+        output.textContent = '错误: ' + e.message;
+        output.className = 'output-area error';
+      }
+    }
+
+    async function disassembleCode() {
+      if (!currentMalbolge) {
+        alert('请先编译代码');
+        return;
+      }
+      
+      try {
+        const response = await fetch('/api/disassemble', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: currentMalbolge })
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(data.error || '反汇编失败');
+        }
+        
+        document.getElementById('output').textContent = 
+          '=== 归一化 Malbolge ===\n' + data.normalizedCode + '\n\n=== 原始 Malbolge ===\n' + currentMalbolge;
+      } catch (e) {
+        alert('反汇编错误: ' + e.message);
+      }
+    }
+
+    function copyOutput() {
+      if (!currentMalbolge) {
+        alert('没有可复制的内容');
+        return;
+      }
+      navigator.clipboard.writeText(currentMalbolge).then(() => {
+        alert('已复制到剪贴板');
+      }).catch(() => {
+        alert('复制失败');
+      });
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "name": "malbolge-compiler",
+  "version": "1.0.0",
+  "description": "A backend service that compiles ordinary code into Malbolge",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node index.js",
+    "test": "node test-all.js"
+  },
+  "keywords": ["malbolge", "compiler", "esoteric", "api"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^5.2.1"
+  }
+}
