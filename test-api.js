@@ -241,7 +241,82 @@ async function runTests() {
     });
 
     console.log();
-    console.log('8. Error Handling');
+    console.log('8. Session-based Debug API');
+    console.log('-'.repeat(40));
+
+    await test('POST /api/debug/init creates session', async () => {
+      const res = await makeRequest('POST', '/api/debug/init', {
+        code: 'Q'
+      });
+      if (res.status !== 200) throw new Error(`Expected 200, got ${res.status}`);
+      if (!res.data.sessionId) throw new Error('Expected sessionId in response');
+      if (!res.data.sessionId.startsWith('dbg_')) throw new Error('Expected sessionId to start with dbg_');
+      if (res.data.C !== 0) throw new Error('Expected C=0');
+      if (res.data.D !== 0) throw new Error('Expected D=0');
+      if (res.data.A !== 0) throw new Error('Expected A=0');
+      if (!Array.isArray(res.data.programMemory)) throw new Error('Expected programMemory array');
+      if (!Array.isArray(res.data.memoryPage)) throw new Error('Expected memoryPage array');
+      if (res.data.programLength !== 1) throw new Error('Expected programLength=1');
+    });
+
+    await test('POST /api/debug/init with no code returns 400', async () => {
+      const res = await makeRequest('POST', '/api/debug/init', {});
+      if (res.status !== 400) throw new Error(`Expected 400, got ${res.status}`);
+    });
+
+    await test('POST /api/debug/step executes one step', async () => {
+      const initRes = await makeRequest('POST', '/api/debug/init', { code: 'Q' });
+      if (initRes.status !== 200) throw new Error('Init failed');
+      const sessionId = initRes.data.sessionId;
+
+      const stepRes = await makeRequest('POST', '/api/debug/step', { sessionId });
+      if (stepRes.status !== 200) throw new Error(`Expected 200, got ${stepRes.status}`);
+      if (stepRes.data.halted !== true) throw new Error('Expected halted: true');
+      if (stepRes.data.steps !== 1) throw new Error(`Expected steps=1, got ${stepRes.data.steps}`);
+      if (!stepRes.data.instruction) throw new Error('Expected instruction in response');
+    });
+
+    await test('POST /api/debug/step with invalid sessionId returns 404', async () => {
+      const res = await makeRequest('POST', '/api/debug/step', { sessionId: 'invalid_session' });
+      if (res.status !== 404) throw new Error(`Expected 404, got ${res.status}`);
+    });
+
+    await test('POST /api/debug/memory returns memory page', async () => {
+      const initRes = await makeRequest('POST', '/api/debug/init', { code: 'ABCDEFG' });
+      if (initRes.status !== 200) throw new Error('Init failed');
+      const sessionId = initRes.data.sessionId;
+
+      const memRes = await makeRequest('POST', '/api/debug/memory', { sessionId, start: 0, size: 256 });
+      if (memRes.status !== 200) throw new Error(`Expected 200, got ${memRes.status}`);
+      if (!Array.isArray(memRes.data.page)) throw new Error('Expected page array');
+      if (memRes.data.page.length !== 256) throw new Error(`Expected 256 entries, got ${memRes.data.page.length}`);
+      if (memRes.data.page[0].address !== 0) throw new Error('Expected first entry address=0');
+      if (typeof memRes.data.page[0].value !== 'number') throw new Error('Expected value to be number');
+    });
+
+    await test('POST /api/debug/memory with invalid sessionId returns 404', async () => {
+      const res = await makeRequest('POST', '/api/debug/memory', { sessionId: 'invalid_session' });
+      if (res.status !== 404) throw new Error(`Expected 404, got ${res.status}`);
+    });
+
+    await test('Full debug session: init -> step -> memory', async () => {
+      const initRes = await makeRequest('POST', '/api/debug/init', { code: 'ABCDEFGHIJ' });
+      if (initRes.status !== 200) throw new Error('Init failed');
+      const sessionId = initRes.data.sessionId;
+
+      for (let i = 0; i < 3; i++) {
+        const stepRes = await makeRequest('POST', '/api/debug/step', { sessionId });
+        if (stepRes.status !== 200) throw new Error(`Step ${i+1} failed`);
+        if (stepRes.data.steps !== i + 1) throw new Error(`Expected steps=${i+1}, got ${stepRes.data.steps}`);
+      }
+
+      const memRes = await makeRequest('POST', '/api/debug/memory', { sessionId, start: 0, size: 50 });
+      if (memRes.status !== 200) throw new Error('Memory query failed');
+      if (memRes.data.page.length !== 50) throw new Error('Expected 50 memory entries');
+    });
+
+    console.log();
+    console.log('9. Error Handling');
     console.log('-'.repeat(40));
 
     await test('404 for unknown route', async () => {

@@ -1,0 +1,50 @@
+﻿============================================================
+  Malbolge Compiler - Debug Mode Tests
+============================================================
+
+1. Debug Core Function Tests
+----------------------------------------
+  鉁?decodeOp decodes halt instruction correctly
+  鉁?decodeOp decodes output instruction correctly
+  鉁?OP_NAMES contains all 8 operations
+  鉁?debug with halt-only program returns correct state
+  鉁?debug returns register details
+  鉁?debug returns current instruction info
+  鉁?debug returns next instruction info (when valid)
+
+2. Breakpoint Tests
+----------------------------------------
+  鉁?debug with breakAtAddress stops at correct address
+  鉁?debug with breakAtAddress 0 stops before first instruction
+  鉁?debug with invalid breakAtAddress throws error in API (tested separately)
+
+3. Memory Snapshot Tests
+----------------------------------------
+  鉁?debug returns memory snapshot
+  鉁?debug memory snapshot entries have correct structure
+  鉁?debug memory snapshot correctly identifies program vs non-program memory
+  鉁?debug memory snapshot handles large ranges
+  鉁?debug memory snapshot clamps to valid range
+
+4. Trace Tests
+----------------------------------------
+  鉁?debug returns execution trace
+  鉁?trace entries have correct structure
+  鉁?trace shows self-modification info
+  鉁?trace shows instruction results
+  鉁?trace respects traceLastSteps limit
+
+5. Error Detection Tests
+----------------------------------------
+  鉁?debug detects invalid instruction errors
+  鉁?debug captures error address and message
+  鉁?debug stops at maxSteps
+
+6. Program Info Tests
+----------------------------------------
+  鉁?debug returns program info
+  鉁?debug registers indicate if pointers are in program
+
+============================================================
+  Results: 25 passed, 0 failed
+============================================================

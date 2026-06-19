@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Malbolge Visual Debugger</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2129;--border:#30363d;--text:#e6edf3;--muted:#8b949e;--accent:#58a6ff;--green:#7ee787;--orange:#f0883e;--red:#ff7b72;--purple:#d2a8ff;--yellow:#d29922;--cyan:#39d2c0}
+body{font-family:'SF Mono',Consolas,'Courier New',monospace;background:var(--bg);color:var(--text);height:100vh;overflow:hidden;display:flex;flex-direction:column}
+.header{background:var(--surface);border-bottom:1px solid var(--border);padding:8px 16px;display:flex;align-items:center;gap:16px;flex-shrink:0}
+.header h1{font-size:15px;background:linear-gradient(135deg,var(--accent),var(--purple));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;white-space:nowrap}
+.toolbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.btn{background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 12px;cursor:pointer;font-size:12px;font-family:inherit;display:flex;align-items:center;gap:4px;white-space:nowrap;transition:all .15s}
+.btn:hover{border-color:var(--accent);background:#21262d}
+.btn:disabled{opacity:.4;cursor:not-allowed;border-color:var(--border)}
+.btn.primary{background:#238636;border-color:#238636;color:#fff}
+.btn.primary:hover{background:#2ea043}
+.btn.danger{border-color:var(--red);color:var(--red)}
+.btn.danger:hover{background:rgba(255,123,114,.1)}
+.btn.running{border-color:var(--yellow);color:var(--yellow);animation:pulse 1s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+.input-area{display:flex;gap:6px;align-items:center}
+.input-area textarea{width:200px;height:28px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:11px;font-family:inherit;resize:none}
+.input-area textarea:focus{outline:none;border-color:var(--accent)}
+.status-bar{margin-left:auto;display:flex;gap:12px;font-size:11px;color:var(--muted)}
+.status-bar .val{color:var(--accent);font-weight:600}
+.main{display:grid;grid-template-columns:280px 1fr 320px;grid-template-rows:1fr 200px;flex:1;overflow:hidden}
+.panel{background:var(--surface);border:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+.panel-title{padding:6px 10px;font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px;flex-shrink:0}
+.panel-title .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.panel-body{flex:1;overflow-y:auto;padding:0}
+.program-panel{grid-row:1/3}
+.program-list{padding:0}
+.program-line{display:flex;align-items:stretch;font-size:11px;border-bottom:1px solid rgba(48,54,61,.3);cursor:pointer;transition:background .1s}
+.program-line:hover{background:rgba(88,166,255,.05)}
+.program-line.current{background:rgba(88,166,255,.15);border-left:3px solid var(--accent)}
+.program-line.dataptr{background:rgba(210,168,255,.08);border-left:3px solid var(--purple)}
+.program-line.halted{background:rgba(255,123,114,.1);border-left:3px solid var(--red)}
+.program-line.selfmod{background:rgba(210,153,34,.08);border-left:3px solid var(--yellow)}
+.line-addr{width:40px;text-align:right;padding:3px 6px;color:var(--muted);flex-shrink:0;font-size:10px}
+.line-char{width:30px;text-align:center;padding:3px 4px;color:var(--orange);flex-shrink:0;font-weight:600}
+.line-mnem{width:24px;text-align:center;padding:3px 4px;color:var(--cyan);flex-shrink:0;font-weight:700}
+.line-op{padding:3px 6px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px}
+.line-badge{padding:3px 6px;font-size:9px;font-weight:600;border-radius:3px;flex-shrink:0;margin:auto 4px}
+.badge-c{background:rgba(88,166,255,.2);color:var(--accent)}
+.badge-d{background:rgba(210,168,255,.2);color:var(--purple)}
+.badge-sm{background:rgba(210,153,34,.2);color:var(--yellow)}
+.registers-panel{grid-column:2}
+.reg-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:8px}
+.reg-card{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px;text-align:center}
+.reg-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px}
+.reg-value{font-size:20px;font-weight:700;color:var(--accent);margin-bottom:4px}
+.reg-detail{font-size:10px;color:var(--muted);line-height:1.4}
+.reg-detail .char-display{color:var(--green);font-weight:600}
+.reg-detail .trit-display{color:var(--orange);font-family:monospace}
+.memory-panel{grid-column:2;grid-row:2}
+.mem-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(36px,1fr));gap:1px;padding:6px}
+.mem-cell{aspect-ratio:1;display:flex;align-items:center;justify-content:center;font-size:8px;border-radius:2px;position:relative;cursor:default;transition:transform .1s}
+.mem-cell:hover{transform:scale(1.3);z-index:10}
+.mem-cell .tooltip{display:none;position:absolute;bottom:100%;left:50%;transform:translateX(-50%);background:#1c2129;border:1px solid var(--border);padding:4px 8px;border-radius:4px;font-size:10px;white-space:nowrap;z-index:100;pointer-events:none}
+.mem-cell:hover .tooltip{display:block}
+.mem-prog{background:rgba(88,166,255,.15);color:var(--accent)}
+.mem-data{background:rgba(139,148,158,.08);color:var(--muted)}
+.mem-cursor{background:rgba(88,166,255,.4)!important;color:#fff!important;box-shadow:0 0 6px rgba(88,166,255,.5)}
+.mem-dptr{background:rgba(210,168,255,.35)!important;color:#fff!important;box-shadow:0 0 6px rgba(210,168,255,.4)}
+.mem-zero{background:rgba(139,148,158,.03);color:rgba(139,148,158,.3)}
+.trace-panel{grid-column:3;grid-row:1/3}
+.trace-entry{padding:6px 8px;border-bottom:1px solid rgba(48,54,61,.4);font-size:10px;line-height:1.4}
+.trace-entry:last-child{border-bottom:none}
+.trace-step{color:var(--accent);font-weight:700}
+.trace-op{color:var(--cyan);font-weight:600}
+.trace-result{color:var(--green)}
+.trace-err{color:var(--red)}
+.trace-sm{color:var(--yellow);font-weight:600}
+.trace-regs{color:var(--muted);font-size:9px}
+.output-panel{position:absolute;bottom:0;left:280px;right:320px;height:200px;background:var(--surface);border:1px solid var(--border);display:flex;flex-direction:column;z-index:5}
+.output-panel .panel-title{cursor:ns-resize}
+.output-content{flex:1;overflow-y:auto;padding:8px;font-size:12px;color:var(--green);white-space:pre-wrap;word-break:break-all;line-height:1.5}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:var(--muted)}
+.sep{width:1px;height:20px;background:var(--border);margin:0 4px}
+.breakpoint-marker{width:8px;height:8px;border-radius:50%;background:var(--red);flex-shrink:0;margin:auto 4px auto 0;cursor:pointer;opacity:.6;transition:opacity .15s}
+.breakpoint-marker:hover{opacity:1}
+.breakpoint-marker.active{opacity:1;box-shadow:0 0 4px var(--red)}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Malbolge Visual Debugger</h1>
+  <div class="toolbar">
+    <textarea id="codeInput" placeholder="Paste Malbolge code..." rows="1"></textarea>
+    <button class="btn primary" id="btnLoad" onclick="loadProgram()">Load</button>
+    <div class="sep"></div>
+    <button class="btn" id="btnStep" onclick="stepOnce()" disabled>Step</button>
+    <button class="btn" id="btnRun10" onclick="runSteps(10)" disabled>Run 10</button>
+    <button class="btn" id="btnRun100" onclick="runSteps(100)" disabled>Run 100</button>
+    <button class="btn" id="btnRunBp" onclick="runToBreakpoint()" disabled>Run to BP</button>
+    <button class="btn danger" id="btnStop" onclick="stopRun()" disabled style="display:none">Stop</button>
+    <div class="sep"></div>
+    <button class="btn" id="btnReset" onclick="resetDebug()" disabled>Reset</button>
+  </div>
+  <div class="status-bar">
+    <span>Step: <span class="val" id="statSteps">0</span></span>
+    <span>Output: <span class="val" id="statOutputLen">0</span></span>
+    <span id="statStatus" style="color:var(--muted)">Ready</span>
+  </div>
+</div>
+
+<div class="main" style="position:relative">
+  <div class="panel program-panel">
+    <div class="panel-title"><span class="dot" style="background:var(--accent)"></span>Program</div>
+    <div class="panel-body" id="programList"></div>
+  </div>
+
+  <div class="panel registers-panel">
+    <div class="panel-title"><span class="dot" style="background:var(--green)"></span>Registers</div>
+    <div class="panel-body">
+      <div class="reg-grid">
+        <div class="reg-card">
+          <div class="reg-label">A (Accumulator)</div>
+          <div class="reg-value" id="regA">0</div>
+          <div class="reg-detail">
+            <span class="char-display" id="regAChar">NUL</span><br>
+            <span class="trit-display" id="regATrits">0000000000</span>
+          </div>
+        </div>
+        <div class="reg-card">
+          <div class="reg-label">C (Code Ptr)</div>
+          <div class="reg-value" id="regC">0</div>
+          <div class="reg-detail" id="regCDetail">In program</div>
+        </div>
+        <div class="reg-card">
+          <div class="reg-label">D (Data Ptr)</div>
+          <div class="reg-value" id="regD">0</div>
+          <div class="reg-detail" id="regDDetail">→ [0] = 0</div>
+        </div>
+      </div>
+      <div style="padding:8px;font-size:11px">
+        <div style="margin-bottom:6px;color:var(--muted)">Current Instruction</div>
+        <div id="instrDetail" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px;line-height:1.6">
+          <span style="color:var(--muted)">No program loaded</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel memory-panel">
+    <div class="panel-title"><span class="dot" style="background:var(--orange)"></span>Memory <span id="memRange" style="color:var(--text);margin-left:auto;font-size:10px">0-255</span></div>
+    <div class="panel-body">
+      <div class="mem-grid" id="memGrid"></div>
+    </div>
+  </div>
+
+  <div class="panel trace-panel">
+    <div class="panel-title"><span class="dot" style="background:var(--purple)"></span>Execution Trace</div>
+    <div class="panel-body" id="traceList"></div>
+  </div>
+
+  <div class="panel output-panel" id="outputPanel">
+    <div class="panel-title"><span class="dot" style="background:var(--green)"></span>Output</div>
+    <div class="output-content" id="outputContent">No output yet...</div>
+  </div>
+</div>
+
+<script>
+const OP_COLORS = {
+  jump:   {bg:'rgba(88,166,255,.15)',  text:'#58a6ff'},
+  output: {bg:'rgba(126,231,135,.15)', text:'#7ee787'},
+  input:  {bg:'rgba(57,210,192,.15)',  text:'#39d2c0'},
+  rotate: {bg:'rgba(240,136,62,.15)',  text:'#f0883e'},
+  dataptr:{bg:'rgba(210,168,255,.15)', text:'#d2a8ff'},
+  crazy:  {bg:'rgba(255,123,114,.15)', text:'#ff7b72'},
+  nop:    {bg:'rgba(139,148,158,.1)',  text:'#8b949e'},
+  halt:   {bg:'rgba(255,123,114,.2)',  text:'#ff7b72'},
+  unknown:{bg:'rgba(139,148,158,.05)', text:'#484f58'}
+};
+
+let sessionId = null;
+let programMemory = [];
+let memoryPage = [];
+let programLength = 0;
+let C = 0, D = 0, A = 0;
+let steps = 0;
+let output = '';
+let halted = false;
+let error = null;
+let breakpoints = new Set();
+let running = false;
+
+document.getElementById('codeInput').value = "Q";
+
+async function api(endpoint, body) {
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(body)
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || data.message || 'API error');
+  return data;
+}
+
+async function loadProgram() {
+  const code = document.getElementById('codeInput').value.trim();
+  if (!code) return;
+
+  try {
+    const data = await api('/api/debug/init', { code });
+    sessionId = data.sessionId;
+    C = data.C;
+    D = data.D;
+    A = data.A;
+    steps = data.steps;
+    output = data.output;
+    halted = data.halted;
+    error = data.error;
+    programLength = data.programLength;
+    programMemory = data.programMemory;
+    memoryPage = data.memoryPage;
+    breakpoints.clear();
+
+    renderProgram();
+    updateRegisters();
+    renderMemory();
+    updateControls();
+    document.getElementById('traceList').innerHTML = '';
+    document.getElementById('outputContent').textContent = 'No output yet...';
+    document.getElementById('statSteps').textContent = '0';
+    document.getElementById('statOutputLen').textContent = '0';
+    document.getElementById('statStatus').textContent = 'Loaded';
+    document.getElementById('statStatus').style.color = 'var(--green)';
+  } catch(e) {
+    alert('Load failed: ' + e.message);
+  }
+}
+
+function renderProgram() {
+  const container = document.getElementById('programList');
+  container.innerHTML = '';
+
+  for (let i = 0; i < programMemory.length; i++) {
+    const cell = programMemory[i];
+    const line = document.createElement('div');
+    line.className = 'program-line';
+    line.dataset.addr = i;
+
+    if (i === C) line.classList.add('current');
+    if (i === D) line.classList.add('dataptr');
+
+    const addr = document.createElement('span');
+    addr.className = 'line-addr';
+    addr.textContent = i;
+
+    const chr = document.createElement('span');
+    chr.className = 'line-char';
+    chr.textContent = cell.char || '.';
+
+    const mnem = document.createElement('span');
+    mnem.className = 'line-mnem';
+    mnem.textContent = cell.decodedOp ? cell.decodedOp.mnem : '?';
+    if (cell.decodedOp) {
+      const colors = OP_COLORS[cell.decodedOp.name] || OP_COLORS.unknown;
+      mnem.style.color = colors.text;
+    }
+
+    const op = document.createElement('span');
+    op.className = 'line-op';
+    op.textContent = cell.decodedOp ? cell.decodedOp.name + (cell.decodedOp.desc ? ' — ' + cell.decodedOp.desc : '') : '???';
+
+    line.appendChild(addr);
+    line.appendChild(chr);
+    line.appendChild(mnem);
+    line.appendChild(op);
+
+    const bpMarker = document.createElement('span');
+    bpMarker.className = 'breakpoint-marker' + (breakpoints.has(i) ? ' active' : '');
+    bpMarker.onclick = (e) => { e.stopPropagation(); toggleBreakpoint(i); };
+    line.appendChild(bpMarker);
+
+    if (i === C) {
+      const badge = document.createElement('span');
+      badge.className = 'line-badge badge-c';
+      badge.textContent = 'C';
+      line.appendChild(badge);
+    }
+    if (i === D && i !== C) {
+      const badge = document.createElement('span');
+      badge.className = 'line-badge badge-d';
+      badge.textContent = 'D';
+      line.appendChild(badge);
+    }
+
+    container.appendChild(line);
+  }
+
+  const currentLine = container.querySelector('.current');
+  if (currentLine) currentLine.scrollIntoView({block:'center',behavior:'smooth'});
+}
+
+function toggleBreakpoint(addr) {
+  if (breakpoints.has(addr)) breakpoints.delete(addr);
+  else breakpoints.add(addr);
+  renderProgram();
+}
+
+function updateRegisters() {
+  document.getElementById('regA').textContent = A;
+  document.getElementById('regAChar').textContent = (A % 256 >= 32 && A % 256 < 127)
+    ? "'" + String.fromCharCode(A % 256) + "'"
+    : '0x' + (A % 256).toString(16).padStart(2,'0');
+  document.getElementById('regATrits').textContent = A.toString(3).padStart(10,'0');
+  document.getElementById('regC').textContent = C;
+  document.getElementById('regCDetail').textContent = C < programLength
+    ? 'In program [' + C + '/' + programLength + ']'
+    : 'OUTSIDE program! (+' + (C - programLength) + ')';
+  document.getElementById('regC').style.color = C < programLength ? 'var(--accent)' : 'var(--red)';
+  document.getElementById('regD').textContent = D;
+
+  const dCell = memoryPage.find(m => m.address === D);
+  const dVal = dCell ? dCell.value : '?';
+  const dChar = dCell && dCell.char ? "'" + dCell.char + "'" : '';
+  document.getElementById('regDDetail').innerHTML = '→ [' + D + '] = ' + dVal +
+    (dChar ? " <span style='color:var(--green)'>" + dChar + "</span>" : '');
+
+  const cCell = memoryPage.find(m => m.address === C) || programMemory[C];
+  const instrDiv = document.getElementById('instrDetail');
+  if (cCell && cCell.decodedOp) {
+    const info = cCell.decodedOp;
+    const colors = OP_COLORS[info.name] || OP_COLORS.unknown;
+    const opCode = (C + cCell.value) % 94;
+    instrDiv.innerHTML =
+      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">' +
+        '<span style="color:var(--muted);font-size:10px">[' + C + ']</span>' +
+        '<span style="font-size:18px;font-weight:700;color:' + colors.text + '">' + info.mnem + '</span>' +
+        '<span style="color:' + colors.text + ';font-weight:600">' + info.name.toUpperCase() + '</span>' +
+        '<span style="color:var(--muted);font-size:10px">\'' + (cCell.char || '?') + '\' (' + cCell.value + ' → op ' + opCode + ')</span>' +
+      '</div>' +
+      '<div style="color:var(--muted);font-size:10px">[D]=' + dVal + ' | A=' + A + '</div>';
+  } else if (cCell) {
+    instrDiv.innerHTML = '<span style="color:var(--red);font-weight:600">INVALID INSTRUCTION at [' + C + ']: value ' + cCell.value + '</span>';
+  } else {
+    instrDiv.innerHTML = '<span style="color:var(--muted)">Position [' + C + '] outside program memory</span>';
+  }
+}
+
+function renderMemory() {
+  const grid = document.getElementById('memGrid');
+  grid.innerHTML = '';
+  const pageSize = 256;
+  const startAddr = Math.max(0, Math.floor(C / pageSize) * pageSize);
+  const endAddr = Math.min(startAddr + pageSize, 59049);
+  document.getElementById('memRange').textContent = startAddr + '–' + (endAddr - 1);
+
+  for (let i = startAddr; i < endAddr; i++) {
+    const cellData = memoryPage.find(m => m.address === i);
+    const val = cellData ? cellData.value : 0;
+    const cell = document.createElement('div');
+    cell.className = 'mem-cell';
+
+    if (i === C) cell.classList.add('mem-cursor');
+    else if (i === D) cell.classList.add('mem-dptr');
+    else if (val === 0) cell.classList.add('mem-zero');
+    else if (i < programLength) cell.classList.add('mem-prog');
+    else cell.classList.add('mem-data');
+
+    if (val >= 33 && val <= 126) {
+      cell.textContent = String.fromCharCode(val);
+    } else if (val === 0) {
+      cell.textContent = '·';
+    } else {
+      cell.textContent = val.toString(16).slice(-2).toUpperCase();
+    }
+
+    const tooltip = document.createElement('div');
+    tooltip.className = 'tooltip';
+    tooltip.textContent = '[' + i + '] = ' + val + (val >= 33 && val <= 126 ? " '" + String.fromCharCode(val) + "'" : '');
+    cell.appendChild(tooltip);
+
+    grid.appendChild(cell);
+  }
+}
+
+function addTraceEntry(instruction, selfModification, stepNum) {
+  const container = document.getElementById('traceList');
+  const entry = document.createElement('div');
+  entry.className = 'trace-entry';
+
+  let html = '<span class="trace-step">[' + stepNum + ']</span> ';
+
+  if (instruction) {
+    const colors = OP_COLORS[instruction.operation] || OP_COLORS.unknown;
+    html += '<span class="trace-op" style="color:' + colors.text + '">' + instruction.mnemonic + '</span> ';
+    html += '<span style="color:var(--muted)">' + instruction.operation + '</span> ';
+
+    if (instruction.result) {
+      const r = instruction.result;
+      if (r.outputChar) html += '<span class="trace-result">→ out \'' + r.outputChar.replace(/</g,'&lt;') + '\'</span>';
+      else if (r.jumpTarget !== undefined) html += '<span class="trace-result">→ jump ' + r.newC + '</span>';
+      else if (r.newD !== undefined) html += '<span class="trace-result">→ D=' + r.newD + '</span>';
+      else if (r.crazyResult !== undefined) html += '<span class="trace-result">→ crz=' + r.crazyResult + '</span>';
+      else if (r.rotatedValue !== undefined) html += '<span class="trace-result">→ rot=' + r.rotatedValue + '</span>';
+      else if (r.note === 'HALT') html += '<span class="trace-err">HALT</span>';
+    }
+
+    html += '<br><span class="trace-regs">C=' + instruction.address + ' D=' + instruction.memoryD.address + '</span>';
+  }
+
+  if (selfModification) {
+    html += '<br><span class="trace-sm">SELF-MOD [' + selfModification.address + ']: \'' + selfModification.beforeChar + '\'→\'' + selfModification.afterChar + '\'</span>';
+  }
+
+  entry.innerHTML = html;
+  container.insertBefore(entry, container.firstChild);
+
+  while (container.children.length > 200) container.removeChild(container.lastChild);
+}
+
+function addBreakpointTrace(addr) {
+  const container = document.getElementById('traceList');
+  const entry = document.createElement('div');
+  entry.className = 'trace-entry';
+  entry.innerHTML = '<span style="color:var(--red);font-weight:700">● BREAKPOINT at [' + addr + ']</span>';
+  container.insertBefore(entry, container.firstChild);
+}
+
+function updateControls() {
+  const loaded = sessionId !== null;
+  const canStep = loaded && !halted && !error;
+  document.getElementById('btnStep').disabled = !canStep || running;
+  document.getElementById('btnRun10').disabled = !canStep || running;
+  document.getElementById('btnRun100').disabled = !canStep || running;
+  document.getElementById('btnRunBp').disabled = !canStep || running || breakpoints.size === 0;
+  document.getElementById('btnReset').disabled = !loaded;
+  document.getElementById('btnStop').style.display = running ? '' : 'none';
+  document.getElementById('btnLoad').disabled = running;
+
+  document.getElementById('statSteps').textContent = steps;
+  document.getElementById('statOutputLen').textContent = output.length;
+
+  if (halted) {
+    document.getElementById('statStatus').textContent = 'HALTED';
+    document.getElementById('statStatus').style.color = 'var(--red)';
+  } else if (error) {
+    document.getElementById('statStatus').textContent = 'ERROR';
+    document.getElementById('statStatus').style.color = 'var(--red)';
+  } else if (running) {
+    document.getElementById('statStatus').textContent = 'RUNNING...';
+    document.getElementById('statStatus').style.color = 'var(--yellow)';
+  } else if (loaded) {
+    document.getElementById('statStatus').textContent = 'PAUSED';
+    document.getElementById('statStatus').style.color = 'var(--green)';
+  } else {
+    document.getElementById('statStatus').textContent = 'Ready';
+    document.getElementById('statStatus').style.color = 'var(--muted)';
+  }
+}
+
+async function refreshMemoryPage() {
+  if (!sessionId) return;
+  try {
+    const start = Math.max(0, Math.floor(C / 256) * 256);
+    const data = await api('/api/debug/memory', { sessionId, start, size: 256 });
+    memoryPage = data.page;
+    C = data.C;
+    D = data.D;
+  } catch(e) {
+    console.warn('Memory refresh failed:', e);
+  }
+}
+
+async function stepOnce() {
+  if (!sessionId || halted || error) return;
+
+  try {
+    const data = await api('/api/debug/step', { sessionId });
+    C = data.C;
+    D = data.D;
+    A = data.A;
+    steps = data.steps;
+    output = data.output;
+    halted = data.halted;
+    error = data.error;
+
+    if (data.instruction) addTraceEntry(data.instruction, data.selfModification, steps);
+
+    if (breakpoints.has(C) && steps > 1) {
+      stopRun();
+      addBreakpointTrace(C);
+    }
+
+    if (output) {
+      document.getElementById('outputContent').textContent = output;
+    }
+
+    await refreshMemoryPage();
+    updateAfterStep();
+  } catch(e) {
+    alert('Step error: ' + e.message);
+    running = false;
+    updateControls();
+  }
+}
+
+function updateAfterStep() {
+  updateProgramHighlight();
+  updateRegisters();
+  renderMemory();
+  updateControls();
+}
+
+function updateProgramHighlight() {
+  const lines = document.querySelectorAll('.program-line');
+  lines.forEach(line => {
+    const addr = parseInt(line.dataset.addr);
+    line.classList.remove('current', 'dataptr');
+    if (addr === C) line.classList.add('current');
+    if (addr === D) line.classList.add('dataptr');
+
+    const badges = line.querySelectorAll('.line-badge');
+    badges.forEach(b => b.remove());
+    if (addr === C) {
+      const badge = document.createElement('span');
+      badge.className = 'line-badge badge-c';
+      badge.textContent = 'C';
+      line.appendChild(badge);
+    }
+    if (addr === D && addr !== C) {
+      const badge = document.createElement('span');
+      badge.className = 'line-badge badge-d';
+      badge.textContent = 'D';
+      line.appendChild(badge);
+    }
+  });
+
+  const currentLine = document.querySelector('.program-line.current');
+  if (currentLine) currentLine.scrollIntoView({block:'center',behavior:'smooth'});
+}
+
+async function runSteps(n) {
+  if (!sessionId || halted || error) return;
+  running = true;
+  updateControls();
+
+  for (let i = 0; i < n; i++) {
+    if (!running || halted || error) break;
+    await stepOnce();
+    if (breakpoints.has(C)) break;
+    if (n > 20) await new Promise(r => setTimeout(r, 0));
+  }
+
+  running = false;
+  updateControls();
+}
+
+async function runToBreakpoint() {
+  if (!sessionId || halted || error || breakpoints.size === 0) return;
+  running = true;
+  updateControls();
+
+  let count = 0;
+  while (running && !halted && !error) {
+    await stepOnce();
+    count++;
+    if (breakpoints.has(C)) break;
+    if (count % 50 === 0) await new Promise(r => setTimeout(r, 0));
+    if (count >= 100000) break;
+  }
+
+  running = false;
+  updateControls();
+}
+
+function stopRun() {
+  running = false;
+  updateControls();
+}
+
+async function resetDebug() {
+  stopRun();
+  await loadProgram();
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'TEXTAREA') return;
+  if (e.key === 'F10' || e.key === 'n') { e.preventDefault(); stepOnce(); }
+  if (e.key === 'F5') { e.preventDefault(); if (breakpoints.size > 0) runToBreakpoint(); else runSteps(100); }
+  if (e.key === 'Escape') { e.preventDefault(); stopRun(); }
+});
+</script>
+</body>
+</html>

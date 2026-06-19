@@ -406,11 +406,178 @@ function debug(source, options = {}) {
   };
 }
 
+function stepDebug(state) {
+  const { memory: memoryInput, C: inputC, D: inputD, A: inputA, input: inputStr = '', inputPos = 0, steps = 0, output: currentOutput = '' } = state;
+
+  const memory = memoryInput.slice();
+  let C = inputC;
+  let D = inputD;
+  let A = inputA;
+  let output = currentOutput;
+  let halted = false;
+  let error = null;
+
+  const cell = memory[C];
+  if (cell < 33 || cell > 126) {
+    halted = true;
+    error = `Invalid instruction at address ${C}: value ${cell} (out of printable range 33-126)`;
+    return {
+      memory,
+      C,
+      D,
+      A,
+      output,
+      inputPos,
+      steps: steps + 1,
+      halted,
+      error,
+      instruction: null,
+      selfModification: null
+    };
+  }
+
+  const op = (C + cell) % 94;
+  const opInfo = decodeOp(cell, C);
+  const originalC = C;
+
+  const instruction = {
+    address: C,
+    charCode: cell,
+    char: String.fromCharCode(cell),
+    opCode: op,
+    mnemonic: opInfo.mnem,
+    operation: opInfo.name,
+    description: opInfo.desc,
+    memoryD: { address: D, value: memory[D] }
+  };
+
+  let result = {};
+
+  switch (op) {
+    case 4:
+      C = (memory[D] - 1 + MEMORY_SIZE) % MEMORY_SIZE;
+      result = { jumpTarget: memory[D], newC: C };
+      break;
+    case 5:
+      const outChar = String.fromCharCode(A % 256);
+      output += outChar;
+      result = { outputChar: outChar, outputCharCode: A % 256 };
+      break;
+    case 23:
+      if (inputPos < inputStr.length) {
+        A = inputStr.charCodeAt(inputPos);
+        inputPos++;
+      } else {
+        A = 0;
+      }
+      result = { newA: A };
+      break;
+    case 39:
+      const rotated = rotr(memory[D]);
+      A = rotated;
+      memory[D] = rotated;
+      result = { rotatedValue: rotated, newA: A };
+      break;
+    case 40:
+      D = memory[D] % MEMORY_SIZE;
+      result = { newD: D };
+      break;
+    case 62:
+      const crazyResult = crz(memory[D], A);
+      A = crazyResult;
+      memory[D] = crazyResult;
+      result = { crazyResult, newA: A };
+      break;
+    case 68:
+      result = { note: 'NOP' };
+      break;
+    case 81:
+      halted = true;
+      result = { note: 'HALT' };
+      break;
+    default:
+      result = { note: 'NOP (unknown opcode)' };
+      break;
+  }
+
+  instruction.result = result;
+
+  let selfModification = null;
+  if (!halted) {
+    const originalCell = memory[originalC];
+    if (originalCell >= 33 && originalCell <= 126) {
+      memory[originalC] = xlat2(originalCell);
+      if (originalCell !== memory[originalC]) {
+        selfModification = {
+          address: originalC,
+          before: originalCell,
+          beforeChar: String.fromCharCode(originalCell),
+          after: memory[originalC],
+          afterChar: String.fromCharCode(memory[originalC])
+        };
+      }
+    }
+
+    C = (C + 1) % MEMORY_SIZE;
+    D = (D + 1) % MEMORY_SIZE;
+  }
+
+  return {
+    memory,
+    C,
+    D,
+    A,
+    output,
+    inputPos,
+    steps: steps + 1,
+    halted,
+    error,
+    instruction,
+    selfModification
+  };
+}
+
+function initDebugState(source, input = '') {
+  const memory = loadProgram(source);
+  return {
+    memory,
+    C: 0,
+    D: 0,
+    A: 0,
+    input,
+    inputPos: 0,
+    steps: 0,
+    output: '',
+    halted: false,
+    error: null,
+    programLength: validateProgram(source).length
+  };
+}
+
+function getMemoryPage(memory, start, size, programLength) {
+  const result = [];
+  const end = Math.min(start + size, MEMORY_SIZE);
+  for (let i = start; i < end; i++) {
+    const val = memory[i];
+    result.push({
+      address: i,
+      value: val,
+      char: (val >= 33 && val <= 126) ? String.fromCharCode(val) : null,
+      isInstruction: i < programLength,
+      decodedOp: (val >= 33 && val <= 126) ? decodeOp(val, i) : null
+    });
+  }
+  return result;
+}
+
 module.exports = {
   interpret,
   validateProgram,
   loadProgram,
   debug,
+  stepDebug,
+  initDebugState,
+  getMemoryPage,
   decodeOp,
   crz,
   rotr,
